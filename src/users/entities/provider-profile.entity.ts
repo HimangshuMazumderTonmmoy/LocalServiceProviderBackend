@@ -7,7 +7,7 @@ export class ProviderProfile {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @OneToOne(() => User, (user) => user.providerProfile)
+  @OneToOne(() => User, (user) => user.providerProfile, { onDelete: 'CASCADE' })
   @JoinColumn() // // FK column 'userId' is created on THIS table (provider_profiles), not on users
   user: User;
 
