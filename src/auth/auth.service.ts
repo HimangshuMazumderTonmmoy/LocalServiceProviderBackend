@@ -14,17 +14,18 @@ export class AuthService {
     @InjectRepository(User) private userRepo: Repository<User>
   ) { }
 
+  
+
+  private async generateToken(payload: any, expiresIn: string, secret?: string) {
+    const options = secret ? { expiresIn, secret } : { expiresIn };
+    return await this.jwtService.signAsync(payload, options);
+  }
+
   private async issueTokens(user: User) {
-    const payload = { sub: user.id, role: user.role }; // ← ONLY id + role, nothing sensitive
+    const payload = { sub: user.id, role: user.role };
 
-    const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: '15m',
-    });
-
-    const refreshToken = await this.jwtService.signAsync(payload, {
-      secret: process.env.JWT_REFRESH_SECRET, // ← different secret for refresh
-      expiresIn: '7d',
-    });
+    const accessToken = await this.generateToken(payload, '15m');
+    const refreshToken = await this.generateToken(payload, '7d', process.env.JWT_REFRESH_SECRET);
 
     return { accessToken, refreshToken };
   }
@@ -54,15 +55,19 @@ export class AuthService {
   }
  
   async login(body: LoginDto) {
-    let token = '';
-
     const user = await this.userRepo.findOneBy({ email: body.email });
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const isPasswordValid = await bcrypt.compare(body.password, user.passwordHash);
     if (!isPasswordValid) throw new UnauthorizedException('Invalid credentials');
 
-    return await this.issueTokens(user);
+    const tokens = await this.issueTokens(user);
+
+    await this.userRepo.update(user.id, {
+      refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+    });
+
+    return tokens;
   }
 
   async refresh(userId: number, incomingRefreshToken: string) {
@@ -72,9 +77,17 @@ export class AuthService {
     const match = await bcrypt.compare(incomingRefreshToken, user.refreshToken);
     if (!match) throw new UnauthorizedException();
 
-    const tokens = await this.issueTokens(user);
+    const payload = { sub: user.id, role: user.role };
 
-    return {accessToken: tokens.accessToken};
+
+    // const tokens = await this.issueTokens(user);
+
+    // Rotate: save newly issued refresh token
+    // await this.userRepo.update(userId, {
+    //   refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+    // });
+
+    return { accessToken: await this.generateToken(payload, '4m') };
   }
 
   async logout(userId: number) {
